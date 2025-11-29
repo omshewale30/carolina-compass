@@ -22,3 +22,24 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Model weights (large files)
+backend/weights/*.pth
+backend/weights/*.pt
+*.pth
+*.pt
+*MODEL_SETUP.md
+
+*README.md
+

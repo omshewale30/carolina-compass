@@ -6,36 +6,39 @@ export type Landmark = {
 
 export const LANDMARKS: Record<number, Landmark> = {
   0: {
-    name: 'The Old Well',
+    name: 'The Bell Tower',
     description:
-      'The beating heart of campus and a nod to the Temple of Love at Versailles, the Old Well welcomed generations of Tar Heels since the 1890s.',
-    funFact: 'Sip from the fountain on the first day of classes for a little extra GPA luck.',
+      'Dedicated in 1931, the Morehead-Patterson Bell Tower rings across campus every quarter hour and glows Carolina Blue on special nights.',
+    funFact: 'Seniors climb all 172 steps the week before commencement for good luck.',
   },
   1: {
-    name: 'Wilson Library',
+    name: 'Gerrard Hall',
     description:
       'A Beaux-Arts masterpiece opened in 1929, Wilson houses the North Carolina Collection, Southern Folklife archives, and endless marble details.',
     funFact: 'Look up to spot the ornate dome modeled after Renaissance reading rooms.',
   },
   2: {
-    name: 'Bell Tower',
+    name: 'Graham Hall',
     description:
-      'Dedicated in 1931, the Morehead-Patterson Bell Tower rings across campus every quarter hour and glows Carolina Blue on special nights.',
-    funFact: 'Seniors climb all 172 steps the week before commencement for good luck.',
+      'Built in 1914, Graham Hall houses the Department of Political Science and houses a collection of rare books and manuscripts.',
+    funFact: 'The hall is named after William Graham, a former UNC chancellor.',
+
   },
   3: {
-    name: 'Kenan Memorial Stadium',
+    name: 'Person Hall',
     description:
-      'Wrapped by towering pines, Kenan has hosted Tar Heel football for nearly a century and now seats more than 50,000 fans.',
-    funFact: 'The grounds crew paints fresh Carolina Blue lines before every home game.',
+      'Person Hall is a historic building on the University of North Carolina at Chapel Hill campus. It is named after Thomas Person, a former UNC chancellor.',
+    funFact: 'The hall is home to the Department of Psychology and the Department of Sociology.',
   },
   4: {
-    name: 'Ackland Art Museum',
+    name: 'South Building',
     description:
-      'From European masters to cutting-edge installations, Ackland has curated 20,000+ works for students and the Chapel Hill community since 1958.',
-    funFact: 'Keep an eye out for rotating exhibits from student curators every semester.',
+      'The South Building is a historic building on the University of North Carolina at Chapel Hill campus. It is named after Thomas Person, a former UNC chancellor.',
+    funFact: 'The building is home to the Department of Chemistry and the Department of Physics.',
   },
 }
+
+
 
 export const FALLBACK_LANDMARK: Landmark = {
   name: 'Carolina Landmark',

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import useLandmarkClassifier from '../hooks/useLandmarkClassifier'
 import { FALLBACK_LANDMARK, LANDMARKS } from '../data/landmarks'
-import { prepareImageTensor } from '../utils/imageProcessor'
+import { prepareImage } from '../utils/imageProcessor'
 import type { ChangeEvent } from 'react'
 import type { Landmark } from '../data/landmarks'
 
@@ -77,16 +77,14 @@ const Inference = ({ onBack }: InferenceProps) => {
       setAnalysisState('processing')
       setStatusMessage('Analyzing landmark...')
 
-      let tensor
       try {
-        const processed = await prepareImageTensor(file)
-        tensor = processed.tensor
+        const processed = await prepareImage(file)
         setPreviewUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev)
           return processed.previewUrl
         })
 
-        const scores = await predict(processed.tensor)
+        const scores = await predict(processed.file)
         const { index, confidence } = scores.reduce(
           (acc, score, idx) => {
             if (score > acc.confidence) {
@@ -110,8 +108,6 @@ const Inference = ({ onBack }: InferenceProps) => {
         setAnalysisState('error')
         setPrediction(null)
         setStatusMessage('We hit a snag while analyzing. Try another shot.')
-      } finally {
-        tensor?.dispose()
       }
     },
     [error, predict, status],
@@ -134,7 +130,7 @@ const Inference = ({ onBack }: InferenceProps) => {
       case 'error':
         return { label: 'Model unavailable', tone: 'text-rose-600 bg-rose-100' }
       default:
-        return { label: 'Warming up MobileNetV3', tone: 'text-slate-600 bg-slate-100' }
+        return { label: 'Connecting to server', tone: 'text-slate-600 bg-slate-100' }
     }
   }, [status])
 
@@ -170,8 +166,8 @@ const Inference = ({ onBack }: InferenceProps) => {
               <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Choose input</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-900">How would you like to add a photo?</h2>
               <p className="mt-2 text-sm text-slate-500">
-                Capture a new image with your camera or upload one from your library. We&apos;ll resize and
-                normalize it automatically for MobileNetV3.
+                Capture a new image with your camera or upload one from your library. We&apos;ll send it to
+                our ResNet152 model for classification.
               </p>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 <button
@@ -226,7 +222,7 @@ const Inference = ({ onBack }: InferenceProps) => {
                   </div>
                   <p className="text-lg font-medium text-slate-500">Your preview will show up here.</p>
                   <p className="max-w-sm text-sm text-slate-400">
-                    We&apos;ll keep your image on-device and run the AI model locally.
+                    Your image will be sent to our server for analysis using ResNet152.
                   </p>
                 </div>
               )}
@@ -269,8 +265,8 @@ const Inference = ({ onBack }: InferenceProps) => {
             <div className="mt-6 rounded-2xl border border-dashed border-slate-200 p-4 text-xs text-slate-500">
               <p className="font-semibold uppercase tracking-[0.3em] text-slate-400">Model notes</p>
               <ul className="mt-3 list-disc space-y-1 pl-5">
-                <li>Powered by MobileNetV3, running fully in your browser.</li>
-                <li>Images never leave your device—perfect for on-the-go explorers.</li>
+                <li>Powered by ResNet152, running on our inference server.</li>
+                <li>Images are processed server-side for accurate predictions.</li>
                 <li>Try different angles or lighting if the match looks off.</li>
               </ul>
             </div>
