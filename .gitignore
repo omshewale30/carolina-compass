@@ -35,9 +35,6 @@ ENV/
 .venv
 
 # Model weights (large files)
-backend/weights/*.pth
-backend/weights/*.pt
-*.pth
 *.pt
 *MODEL_SETUP.md
 
