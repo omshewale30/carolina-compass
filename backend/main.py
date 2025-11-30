@@ -57,53 +57,74 @@ N_CLASSES = 5
 MODEL_WEIGHTS_PATH = os.getenv("MODEL_WEIGHTS_PATH", "weights/rs-152-c5-best_params.pth")
 model = None
 
-# Image preprocessing
+# Image preprocessing - matches the inference example (no ImageNet normalization)
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    transforms.Resize((224, 224)),  # Resize to model input size
+    transforms.ToTensor(),          # Convert to tensor and normalize to [0, 1]
 ])
 
 
-def load_model():
-    """Load the PyTorch model and weights."""
+def load_model(weights_path=MODEL_WEIGHTS_PATH, device="cpu"):
+    """
+    Load the trained ResNet152 model.
+    
+    Supports both state_dict format and full model format, matching the inference example.
+    
+    Args:
+        weights_path: Path to the model weights file
+        device: 'cpu' or 'cuda'
+    
+    Returns:
+        Loaded model in evaluation mode
+    """
     global model
+    
     if ResNet152 is None:
         raise RuntimeError("ResNet152 model class not available")
     
-    model = ResNet152(num_classes=N_CLASSES)
-    
-    if not os.path.exists(MODEL_WEIGHTS_PATH):
+    if not os.path.exists(weights_path):
         raise FileNotFoundError(
-            f"Model weights not found at {MODEL_WEIGHTS_PATH}. "
+            f"Model weights not found at {weights_path}. "
             "Please set MODEL_WEIGHTS_PATH environment variable or place weights in the default location."
         )
     
-    weights = torch.load(MODEL_WEIGHTS_PATH, map_location="cpu", weights_only=True)
-    
-    # Try to load as state_dict first (standard PyTorch format)
+    # Try loading as state_dict first (most common format)
     try:
-        model.load_state_dict(weights)
-    except (RuntimeError, TypeError):
-        # If that fails, try the user's method (direct parameter assignment)
-        # This handles the case where weights are stored as model._parameters
-        try:
-            model._parameters = weights
-        except Exception as e:
-            raise RuntimeError(
-                f"Could not load model weights. Tried both load_state_dict() and direct assignment. "
-                f"Error: {e}. Please ensure weights match the model architecture."
-            )
+        weights = torch.load(weights_path, map_location=device, weights_only=True)
+        model = ResNet152(num_classes=N_CLASSES)
+        
+        # Try to load as state_dict
+        if isinstance(weights, dict):
+            # It's likely a state_dict
+            try:
+                model.load_state_dict(weights, strict=False)
+            except RuntimeError:
+                # If that fails, it might be wrapped differently
+                # Try accessing model.model if the keys have 'model.' prefix
+                if any('model.' in k for k in weights.keys()):
+                    model.model.load_state_dict(weights, strict=False)
+                else:
+                    raise
+        else:
+            # Not a dict, might be the full model
+            model = weights
+    except (RuntimeError, AttributeError, TypeError) as e:
+        # Fallback: Load as full model (used in eval notebook)
+        print(f"Loading as full model (state_dict failed: {e})")
+        model = torch.load(weights_path, map_location=device, weights_only=False)
     
-    model.eval()
-    print(f"Model loaded successfully from {MODEL_WEIGHTS_PATH}")
+    model.to(device)
+    model.eval()  # Set to evaluation mode (disables dropout, etc.)
+    
+    print(f"Model loaded successfully from {weights_path}")
+    return model
 
 
 @app.on_event("startup")
 async def startup_event():
     """Load model on startup."""
     try:
-        load_model()
+        load_model(MODEL_WEIGHTS_PATH, device="cpu")
     except Exception as e:
         print(f"Error loading model: {e}")
         print("API will start but inference endpoints will fail until model is available.")
@@ -149,20 +170,21 @@ async def predict(file: UploadFile = File(...)):
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         
-        # Preprocess image
-        input_tensor = transform(image).unsqueeze(0)  # Add batch dimension
+        # Preprocess image (matches inference example)
+        image_tensor = transform(image).unsqueeze(0)  # Add batch dimension
+        image_tensor = image_tensor.to(next(model.parameters()).device)
         
-        # Run inference
+        # Run inference (matches inference example)
         with torch.no_grad():
-            pred = model(input_tensor)
-            logits = F.softmax(pred, dim=1)
-            cls_pred = torch.argmax(logits, dim=1).item()
-            confidence = logits[0][cls_pred].item()
+            logits = model(image_tensor)
+            probabilities = F.softmax(logits, dim=1)
+            predicted_class = torch.argmax(probabilities, dim=1).item()
+            confidence = probabilities[0][predicted_class].item()
         
         # Get probabilities for all classes
-        probabilities = logits[0].tolist()
+        all_probabilities = probabilities[0].tolist()
         
-        # Class mapping
+        # Class mapping (matches inference example)
         class_map = {
             0: "bell_tower",
             1: "gerrard_hall",
@@ -172,9 +194,9 @@ async def predict(file: UploadFile = File(...)):
         }
         
         return {
-            "predictions": probabilities,
-            "predicted_class": cls_pred,
-            "predicted_name": class_map.get(cls_pred, "unknown"),
+            "predictions": all_probabilities,
+            "predicted_class": predicted_class,
+            "predicted_name": class_map.get(predicted_class, "unknown"),
             "confidence": confidence
         }
     
