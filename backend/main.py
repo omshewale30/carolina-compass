@@ -47,12 +47,11 @@ N_CLASSES = 5
 MODEL_WEIGHTS_PATH = os.getenv("MODEL_WEIGHTS_PATH", "weights/VIT_best.pth")
 model = None
 
-# Image preprocessing for ViT (Vision Transformer typically uses ImageNet normalization)
-# ViT models usually expect 224x224 images with ImageNet normalization
+# Image preprocessing - matches training pipeline
+# Training only normalizes values between 0 and 255 (ToTensor does this by converting to [0, 1])
 transform = transforms.Compose([
     transforms.Resize((224, 224)),  # Resize to model input size
-    transforms.ToTensor(),          # Convert to tensor and normalize to [0, 1]
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # ImageNet stats
+    transforms.ToTensor(),          # Convert to tensor and normalize to [0, 1] (divides by 255)
 ])
 
 
