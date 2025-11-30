@@ -12,10 +12,10 @@ export const LANDMARKS: Record<number, Landmark> = {
     funFact: 'Seniors climb all 172 steps the week before commencement for good luck.',
   },
   1: {
-    name: 'Gerrard Hall',
+    name: 'Person Hall',
     description:
-      'A Beaux-Arts masterpiece opened in 1929, Wilson houses the North Carolina Collection, Southern Folklife archives, and endless marble details.',
-    funFact: 'Look up to spot the ornate dome modeled after Renaissance reading rooms.',
+      'Person Hall is a historic building on the University of North Carolina at Chapel Hill campus. It is named after Thomas Person, a former UNC chancellor.',
+    funFact: 'The hall is home to the Department of Psychology and the Department of Sociology.',
   },
   2: {
     name: 'Graham Hall',
@@ -25,10 +25,10 @@ export const LANDMARKS: Record<number, Landmark> = {
 
   },
   3: {
-    name: 'Person Hall',
+    name: 'Gerrard Hall',
     description:
-      'Person Hall is a historic building on the University of North Carolina at Chapel Hill campus. It is named after Thomas Person, a former UNC chancellor.',
-    funFact: 'The hall is home to the Department of Psychology and the Department of Sociology.',
+      'A Beaux-Arts masterpiece opened in 1929, Wilson houses the North Carolina Collection, Southern Folklife archives, and endless marble details.',
+    funFact: 'Look up to spot the ornate dome modeled after Renaissance reading rooms.',
   },
   4: {
     name: 'South Building',
