@@ -20,7 +20,7 @@ const Home = ({ onStart }: HomeProps) => {
       </div>
 
       <div className="relative z-10 flex max-w-5xl flex-col items-center gap-10 px-6 text-center md:px-12">
-        <p className="text-sm uppercase tracking-[0.4em] text-slate-200">University Modern</p>
+     
         <div className="flex flex-col gap-6">
           <h1 className="text-4xl font-semibold leading-tight text-white drop-shadow-md md:text-6xl">
             Carolina Compass
@@ -42,7 +42,7 @@ const Home = ({ onStart }: HomeProps) => {
         <div className="mt-16 flex flex-wrap items-center justify-center gap-8 text-left text-sm text-slate-200">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Powered by</p>
-            <p className="text-base font-semibold text-white">TensorFlow.js + MobileNetV3</p>
+            <p className="text-base font-semibold text-white"> ViT B_16_imagenet1k</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Made for</p>

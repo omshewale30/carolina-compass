@@ -167,7 +167,7 @@ const Inference = ({ onBack }: InferenceProps) => {
               <h2 className="mt-2 text-2xl font-semibold text-slate-900">How would you like to add a photo?</h2>
               <p className="mt-2 text-sm text-slate-500">
                 Capture a new image with your camera or upload one from your library. We&apos;ll send it to
-                our ResNet152 model for classification.
+                our Vit B_16_imagenet1k model for classification.
               </p>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 <button
@@ -222,7 +222,7 @@ const Inference = ({ onBack }: InferenceProps) => {
                   </div>
                   <p className="text-lg font-medium text-slate-500">Your preview will show up here.</p>
                   <p className="max-w-sm text-sm text-slate-400">
-                    Your image will be sent to our server for analysis using ResNet152.
+                    Your image will be sent to our server for analysis using Vit B_16_imagenet1k.
                   </p>
                 </div>
               )}
@@ -265,7 +265,7 @@ const Inference = ({ onBack }: InferenceProps) => {
             <div className="mt-6 rounded-2xl border border-dashed border-slate-200 p-4 text-xs text-slate-500">
               <p className="font-semibold uppercase tracking-[0.3em] text-slate-400">Model notes</p>
               <ul className="mt-3 list-disc space-y-1 pl-5">
-                <li>Powered by ResNet152, running on our inference server.</li>
+                <li>Powered by Vit B_16_imagenet1k, running on our inference server.</li>
                 <li>Images are processed server-side for accurate predictions.</li>
                 <li>Try different angles or lighting if the match looks off.</li>
               </ul>
