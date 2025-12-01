@@ -1,35 +1,30 @@
 """
 FastAPI backend for Carolina Compass landmark classification.
-Serves the Vision Transformer (ViT) model for inference.
+
+This version uses OpenAI's GPT‑4o‑mini vision model for inference instead of
+the local ViT model. It accepts an uploaded image, forwards it to the OpenAI
+API, and returns normalized probabilities for the five UNC landmarks.
 """
 
+import base64
 import io
+import json
 import os
-from typing import List
+from typing import Dict, List
 
-import torch
-import torch.nn.functional as F
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-import torchvision.transforms as transforms
+from dotenv import load_dotenv
 
-# Import ViT model architecture
 try:
-    from model.vit import ViTWrapper
+    from openai import OpenAI
 except ImportError:
-    try:
-        from src.model.vit import ViTWrapper
-    except ImportError:
-        print("=" * 60)
-        print("ERROR: Could not import ViTWrapper model class.")
-        print("=" * 60)
-        print("Please ensure your ViT model is available.")
-        print("\nTo fix this:")
-        print("1. Ensure backend/model/vit.py exists")
-        print("2. Or update the import statement in this file")
-        print("=" * 60)
-        ViTWrapper = None
+    OpenAI = None  # type: ignore
+
+# Load environment variables from .env (including OPENAI_API_KEY)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = FastAPI(title="Carolina Compass API", version="1.0.0")
 
@@ -42,197 +37,124 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Model configuration
+# Model / label configuration
 N_CLASSES = 5
-MODEL_WEIGHTS_PATH = os.getenv("MODEL_WEIGHTS_PATH", "weights/VIT_best.pth")
-model = None
 
-# Image preprocessing - matches training pipeline
-# Training only normalizes values between 0 and 255 (ToTensor does this by converting to [0, 1])
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),  # Resize to model input size
-    transforms.ToTensor(),          # Convert to tensor and normalize to [0, 1] (divides by 255)
-])
+BUILDINGS = {
+    0: "bell_tower",
+    1: "person-hall",
+    2: "graham-hall",
+    3: "gerrard-hall",
+    4: "south-building",
+}
 
 
-def load_model(weights_path=MODEL_WEIGHTS_PATH, device="cpu"):
-    """
-    Load the trained Vision Transformer (ViT) model.
-    
-    Supports both state_dict format and full model format.
-    Tries loading as full model first (safest for custom trained models),
-    then falls back to state_dict loading.
-    
-    Args:
-        weights_path: Path to the model weights file
-        device: 'cpu' or 'cuda'
-    
-    Returns:
-        Loaded model in evaluation mode
-    """
-    global model
-    
-    if ViTWrapper is None:
-        raise RuntimeError("ViTWrapper model class not available")
-    
-    if not os.path.exists(weights_path):
-        raise FileNotFoundError(
-            f"Model weights not found at {weights_path}. "
-            "Please set MODEL_WEIGHTS_PATH environment variable or place weights in the default location."
+def get_openai_client() -> "OpenAI":
+    """Create an OpenAI client using the environment variable."""
+    if OpenAI is None:
+        raise RuntimeError(
+            "openai package not installed. Install with `pip install openai` in the backend venv."
         )
-    
-    # Load the weights file
-    print(f"Attempting to load model from {weights_path}")
-    loaded = torch.load(weights_path, map_location=device, weights_only=False)
-    print(f"Loaded file. Type: {type(loaded)}")
-    
-    # Check if it's a model object or a state_dict
-    is_model = isinstance(loaded, torch.nn.Module) or (hasattr(loaded, 'forward') and hasattr(loaded, 'parameters'))
-    is_state_dict = isinstance(loaded, dict) or (hasattr(loaded, 'keys') and not is_model)
-    
-    if is_model and not is_state_dict:
-        # It's a full model object
-        print("Loaded object is a model, using directly")
-        model = loaded
-    else:
-        # It's a state_dict, need to load it into a model instance
-        print("Loaded object is a state_dict, loading into model instance")
-        weights = loaded
-        
-        # Determine image size from positional embedding in checkpoint
-        # This helps initialize the model with the correct architecture
-        image_size = 224  # Default
-        pos_embed_key = None
-        for key in weights.keys():
-            if 'positional_embedding' in key or 'pos_embedding' in key:
-                pos_embed_key = key
-                pos_embed_shape = weights[key].shape
-                # Calculate image size from positional embedding
-                # pos_embedding shape: [1, num_patches + 1, embed_dim]
-                # num_patches = (image_size / patch_size)^2
-                # For ViT-B/16: patch_size=16, so num_patches = (image_size/16)^2
-                num_tokens = pos_embed_shape[1]  # Includes class token
-                num_patches = num_tokens - 1  # Subtract class token
-                # num_patches = (image_size / 16)^2
-                # image_size = sqrt(num_patches) * 16
-                if num_patches > 0:
-                    image_size = int((num_patches ** 0.5) * 16)
-                    print(f"Detected image size from checkpoint: {image_size}x{image_size} (from {num_patches} patches)")
-                break
-        
-        # Initialize ViT model
-        # IMPORTANT: pretrained=False ensures we don't load ImageNet weights
-        # We will load YOUR fine-tuned weights from the checkpoint
-        print(f"Initializing ViT model with num_classes={N_CLASSES}")
-        print(f"⚠️  Using pretrained=False - will load YOUR fine-tuned weights from checkpoint")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Export it before starting the backend."
+        )
+    return OpenAI(api_key=api_key)
+
+
+def encode_image_bytes(image_bytes: bytes) -> str:
+    """Encode raw image bytes to base64 string for the OpenAI API."""
+    return base64.b64encode(image_bytes).decode("utf-8")
+
+
+def call_gpt4o_mini_vision(base64_image: str) -> Dict[str, float]:
+    """
+    Call GPT‑4o‑mini vision model to predict UNC landmarks.
+
+    Returns a mapping from building key (string index) to percentage.
+    """
+    client = get_openai_client()
+
+    prompt = """Identify this UNC Chapel Hill building from exactly these 5 options ONLY:
+
+bell_tower (0), person-hall (1), graham-hall (2), gerrard-hall (3), south-building (4)
+
+Respond with ONLY a JSON object containing confidence percentages that sum to 100, in this exact format:
+{"0": 25.0, "1": 15.0, "2": 10.0, "3": 45.0, "4": 5.0}
+
+Do not include any extra text before or after the JSON."""
+
+    response = client.chat.completions.create(
+        model="gpt-5.1",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                        },
+                    },
+                ],
+            }
+        ],
+        temperature=0.1,
+    )
+
+    content = response.choices[0].message.content
+    if not content:
+        raise ValueError("Empty response from GPT‑4o‑mini.")
+
+    # Some models occasionally wrap JSON in code fences; strip them if present.
+   
+    content_str = content.strip()
+    if content_str.startswith("```"):
+        # Remove leading/trailing fences
+        content_str = content_str.strip("`")
+        # In case of ```json\n...\n``` remove first/last line
+        lines = content_str.splitlines()
+        if lines and lines[0].lstrip().startswith("json"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "":
+            lines = lines[:-1]
+        content_str = "\n".join(lines)
+
+    try:
+        probs = json.loads(content_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse JSON from GPT‑4o‑mini response: {e} | Raw: {content_str}")
+
+    # Ensure keys are strings of indices and values are floats
+    cleaned: Dict[str, float] = {}
+    total = 0.0
+    for k, v in probs.items():
         try:
-            # Try with image_size if supported
-            model = ViTWrapper(src="B_16_imagenet1k", num_classes=N_CLASSES, image_size=image_size, pretrained=False)
-        except (TypeError, ValueError) as e:
-            # If image_size not supported, use default and let strict=False handle mismatches
-            print(f"image_size parameter not supported ({e}), using default (will skip positional embedding)")
-            model = ViTWrapper(src="B_16_imagenet1k", num_classes=N_CLASSES, pretrained=False)
-        
-        # Try to load as state_dict
-        if isinstance(weights, dict):
-            print(f"Loading as state_dict. Keys sample: {list(weights.keys())[:5] if len(weights) > 0 else 'empty'}")
-            # It's likely a state_dict
-            try:
-                model.load_state_dict(weights, strict=False)
-                print("Successfully loaded state_dict into model")
-            except RuntimeError as e:
-                print(f"Direct load_state_dict failed: {e}")
-                # If that fails, it might be wrapped differently
-                # Try accessing model.model if the keys have 'model.' prefix
-                if any('model.' in k for k in weights.keys()):
-                    print("Trying to load into model.model (wrapped structure)")
-                    # Use strict=False to skip mismatched layers (like positional embeddings)
-                    missing_keys, unexpected_keys = model.model.load_state_dict(weights, strict=False)
-                    
-                    # Verify that fine-tuned weights (classifier head) were loaded
-                    classifier_keys = [k for k in weights.keys() if 'classifier' in k.lower() or 'head' in k.lower() or 'fc' in k.lower()]
-                    loaded_classifier_keys = [k for k in classifier_keys if k not in missing_keys]
-                    
-                    print(f"\n{'='*60}")
-                    print("WEIGHT LOADING VERIFICATION:")
-                    print(f"{'='*60}")
-                    print(f"Total weights in checkpoint: {len(weights)}")
-                    print(f"Successfully loaded: {len(weights) - len(missing_keys)}")
-                    print(f"Missing keys (skipped): {len(missing_keys)}")
-                    if missing_keys:
-                        print(f"  Sample missing keys: {list(missing_keys)[:5]}")
-                    if unexpected_keys:
-                        print(f"Unexpected keys (ignored): {len(unexpected_keys)}")
-                    
-                    # Check classifier head specifically
-                    if classifier_keys:
-                        print(f"\nClassifier/Head weights found: {len(classifier_keys)}")
-                        if loaded_classifier_keys:
-                            print(f"  ✅ Classifier weights LOADED: {len(loaded_classifier_keys)}")
-                            print(f"  Sample: {loaded_classifier_keys[:3]}")
-                        else:
-                            print(f"  ⚠️  WARNING: Classifier weights NOT loaded!")
-                            print(f"  Keys: {classifier_keys}")
-                    else:
-                        print(f"\n⚠️  No classifier/head keys found in checkpoint")
-                    print(f"{'='*60}\n")
-                    
-                    print("Successfully loaded state_dict into model.model")
-                else:
-                    # Try removing 'model.' prefix from keys
-                    new_weights = {}
-                    for k, v in weights.items():
-                        if k.startswith('model.'):
-                            new_weights[k[6:]] = v  # Remove 'model.' prefix
-                        else:
-                            new_weights[k] = v
-                    if new_weights != weights:
-                        print("Trying with 'model.' prefix removed")
-                        model.model.load_state_dict(new_weights, strict=False)
-                    else:
-                        raise RuntimeError(f"Could not load state_dict: {e}")
-        else:
-            raise RuntimeError(f"Loaded object is neither a model nor a state_dict. Type: {type(loaded)}")
-    
-    # Move model to device and set to eval mode
-    model.to(device)
-    model.eval()  # Set to evaluation mode (disables dropout, etc.)
-    
-    # Final verification: Check that model is using loaded weights, not pretrained
-    print(f"\n{'='*60}")
-    print("FINAL MODEL VERIFICATION:")
-    print(f"{'='*60}")
-    print(f"Model device: {next(model.parameters()).device}")
-    print(f"Model in eval mode: {not model.training}")
-    
-    # Check if classifier head exists and has the right number of classes
-    try:
-        # Try to find the classifier/head layer
-        if hasattr(model, 'model'):
-            if hasattr(model.model, 'classifier'):
-                num_out_features = model.model.classifier.out_features if hasattr(model.model.classifier, 'out_features') else 'unknown'
-                print(f"Classifier output features: {num_out_features}")
-            elif hasattr(model.model, 'head'):
-                num_out_features = model.model.head.out_features if hasattr(model.model.head, 'out_features') else 'unknown'
-                print(f"Head output features: {num_out_features}")
-            else:
-                print("Classifier/head structure: Checking...")
-    except Exception as e:
-        print(f"Could not verify classifier structure: {e}")
-    
-    print(f"✅ Model loaded successfully from {weights_path}")
-    print(f"{'='*60}\n")
-    return model
+            idx = int(k)
+        except (TypeError, ValueError):
+            continue
+        if idx not in BUILDINGS:
+            continue
+        try:
+            val = float(v)
+        except (TypeError, ValueError):
+            continue
+        cleaned[str(idx)] = val
+        total += val
 
+    if not cleaned:
+        raise ValueError(f"No valid probabilities returned from GPT‑4o‑mini: {probs}")
 
-@app.on_event("startup")
-async def startup_event():
-    """Load model on startup."""
-    try:
-        load_model(MODEL_WEIGHTS_PATH, device="cpu")
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        print("API will start but inference endpoints will fail until model is available.")
+    # Normalize to sum exactly to 1.0 (from percentages)
+    normalized: Dict[int, float] = {}
+    for k_str, v in cleaned.items():
+        idx = int(k_str)
+        normalized[idx] = (v / total) if total > 0 else 0.0
+
+    return normalized
 
 
 @app.get("/")
@@ -240,15 +162,15 @@ async def root():
     """Health check endpoint."""
     return {
         "status": "ok",
-        "model_loaded": model is not None,
-        "model_path": MODEL_WEIGHTS_PATH
+        "model_loaded": True,
+        "model_type": "gpt-4o-mini",
     }
 
 
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "healthy", "model_ready": model is not None}
+    return {"status": "healthy", "model_ready": True, "model_type": "gpt-4o-mini"}
 
 
 @app.post("/predict")
@@ -258,66 +180,46 @@ async def predict(file: UploadFile = File(...)):
     
     Returns:
         {
-            "predictions": [float, ...],  # Softmax probabilities for each class
+            "predictions": [float, ...],  # Probabilities for each class (sum to 1.0)
             "predicted_class": int,        # Index of predicted class
             "predicted_name": str,         # Name of predicted landmark
             "confidence": float            # Confidence score (0-1)
         }
     """
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded. Please check server logs.")
-    
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     
     try:
         # Read image file
         contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-        
-        # Preprocess image for ViT
-        image_tensor = transform(image).unsqueeze(0)  # Add batch dimension
-        device = next(model.parameters()).device
-        image_tensor = image_tensor.to(device)
-        
-        # Run inference
-        with torch.no_grad():
-            logits = model(image_tensor)
-            
-            # Handle different output shapes
-            if logits.dim() > 2:
-                # If output has extra dimensions, flatten or take the right slice
-                logits = logits.view(logits.size(0), -1)
-                # If still wrong shape, take first N_CLASSES
-                if logits.size(1) > N_CLASSES:
-                    logits = logits[:, :N_CLASSES]
-                elif logits.size(1) < N_CLASSES:
-                    raise ValueError(f"Model output has {logits.size(1)} classes, expected {N_CLASSES}")
-            
-            probabilities = F.softmax(logits, dim=1)
-            predicted_class = torch.argmax(probabilities, dim=1).item()
-            confidence = probabilities[0][predicted_class].item()
-        
-        # Get probabilities for all classes
-        all_probabilities = probabilities[0].tolist()
-        
-        # Ensure we have exactly N_CLASSES probabilities
-        if len(all_probabilities) != N_CLASSES:
-            raise ValueError(f"Expected {N_CLASSES} class probabilities, got {len(all_probabilities)}")
-        
-        # Class mapping - updated to match the model's training labels
-        class_map = {
-            0: "bell_tower",
-            1: "person-hall",
-            2: "graham-hall",
-            3: "gerrard-hall",
-            4: "south-building"
-        }
-        
+        # Validate that PIL can open it (helps catch corrupt files)
+        Image.open(io.BytesIO(contents)).convert("RGB")
+
+        # Encode to base64 for OpenAI vision API
+        base64_image = encode_image_bytes(contents)
+
+        # Call GPT‑4o‑mini vision model
+        probs_by_index = call_gpt4o_mini_vision(base64_image)
+        print("probs_by_index", probs_by_index)
+
+        # Build list of probabilities in fixed index order
+        all_probabilities: List[float] = [0.0] * N_CLASSES
+        for idx in range(N_CLASSES):
+            all_probabilities[idx] = float(probs_by_index.get(idx, 0.0))
+        print("all_probabilities", all_probabilities)
+        # Sanity check: normalize again to avoid any rounding issues
+        total = sum(all_probabilities)
+        if total > 0:
+            all_probabilities = [p / total for p in all_probabilities]
+
+        predicted_class = int(max(range(N_CLASSES), key=lambda i: all_probabilities[i]))
+        confidence = float(all_probabilities[predicted_class])
+
+        # Class mapping - matches the frontend label expectations
         return {
             "predictions": all_probabilities,
             "predicted_class": predicted_class,
-            "predicted_name": class_map.get(predicted_class, "unknown"),
+            "predicted_name": BUILDINGS.get(predicted_class, "unknown"),
             "confidence": confidence
         }
     
