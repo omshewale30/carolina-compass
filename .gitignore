@@ -40,5 +40,6 @@ ENV/
 
 *README.md
 /backend/weights/*
+.env
 
 
